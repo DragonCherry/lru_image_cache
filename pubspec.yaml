@@ -1,6 +1,6 @@
 name: lru_image_cache
 description: A lightweight LRU image cache that keeps references for binary data and retrieves Image objects.
-version: 0.5.1
+version: 0.5.2
 homepage: https://github.com/DragonCherry/lru_image_cache
 
 environment:

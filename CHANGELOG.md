@@ -1,3 +1,3 @@
-## [0.5.1]
+## [0.5.2]
 
-Bug fixes. Added example code on README.md.
+Bug fixes. Updated unit test case.
