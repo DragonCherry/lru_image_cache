@@ -3,6 +3,7 @@ library lru_image_cache;
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/painting.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart';
 import 'package:mini_log/mini_log.dart';
@@ -28,6 +29,33 @@ class LRUImageCache {
     // initialize code here
   }
 
+  void _cacheData(final Uint8List imageBytes, final String url) {
+    _lock.synchronized(() {
+      if (currentBytes + imageBytes.length <= maximumBytes) {
+        currentBytes += imageBytes.length;
+      } else {
+        do {
+          if (_identifiers.isNotEmpty) {
+            final lastIdentifier = _identifiers.removeLast();
+            if (lastIdentifier != null) {
+              final imageBytesToRemove = _map.remove(lastIdentifier);
+              currentBytes -= imageBytesToRemove.length;
+            }
+          } else {
+            logw(
+                'Single image bytes(${imageBytes.length}) exceeds cache limit: $maximumBytes');
+            break;
+          }
+        } while (currentBytes + imageBytes.length >= maximumBytes);
+      }
+      _map[url] = imageBytes;
+      _identifiers.insert(0, url);
+      if (isLogEnabled) {
+        logi('Cached $url ($currentBytes / $maximumBytes)');
+      }
+    });
+  }
+
   Future<Image> fetchImage(
       {final String url, final BoxFit fit = BoxFit.contain}) {
     final completer = Completer<Image>();
@@ -44,38 +72,26 @@ class LRUImageCache {
       response.then((value) {
         final imageBytes = value.bodyBytes;
         final image = Image.memory(imageBytes, fit: fit);
-        image.image
-            .resolve(ImageConfiguration())
-            .addListener(ImageStreamListener((imageInfo, _) {
-          final imageSize = Size(imageInfo.image.width.toDouble(),
-              imageInfo.image.height.toDouble());
-          _lock.synchronized(() {
-            _sizeCache[url] = imageSize;
-            if (currentBytes + imageBytes.length <= maximumBytes) {
-              currentBytes += imageBytes.length;
-            } else {
-              do {
-                if (_identifiers.isNotEmpty) {
-                  final lastIdentifier = _identifiers.removeLast();
-                  if (lastIdentifier != null) {
-                    final imageBytesToRemove = _map.remove(lastIdentifier);
-                    currentBytes -= imageBytesToRemove.length;
-                  }
-                } else {
-                  logw(
-                      'Single image bytes(${imageBytes.length}) exceeds cache limit: $maximumBytes');
-                  break;
-                }
-              } while (currentBytes + imageBytes.length >= maximumBytes);
-            }
-            _map[url] = imageBytes;
-            _identifiers.insert(0, url);
-            if (isLogEnabled) {
-              logi('Cached $url ($currentBytes / $maximumBytes)');
-            }
-          });
+        try {
+          _cacheData(imageBytes, url);
+          if (PaintingBinding.instance != null) {
+            image.image
+                .resolve(ImageConfiguration())
+                .addListener(ImageStreamListener((imageInfo, _) {
+              final imageSize = Size(imageInfo.image.width.toDouble(),
+                  imageInfo.image.height.toDouble());
+              _lock.synchronized(() {
+                _sizeCache[url] = imageSize;
+              });
+              completer.complete(image);
+            }));
+          } else {
+            completer.complete(image);
+          }
+        } catch (error) {
+          loge(error);
           completer.complete(image);
-        }));
+        }
       });
     }
     return completer.future;
